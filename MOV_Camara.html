@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Cilindro acostado que orbita y rueda — WebGL puro</title>
+<style>
+  html,body { height:100%; margin:0; }
+  canvas { display:block; width:100%; height:100%; }
+</style>
+</head>
+<body>
+<canvas id="glcanvas"></canvas>
+<div style="margin-top:10px; color:rgb(0, 0, 0);">
+  <label>Ángulo Horizontal (θ): </label>
+  <input type="range" id="thetaSlider" min="0" max="6.28" step="0.01" value="0">
+  <br>
+  <label>Ángulo Vertical (φ): </label>
+  <input type="range" id="phiSlider" min="0.1" max="3.1" step="0.01" value="1.2">
+  <br>
+  <label>Zoom (Radio): </label>
+  <input type="range" id="radiusSlider" min="3" max="50" step="0.1" value="15">
+</div>
+
+<script>
+const canvas = document.getElementById('glcanvas');
+const gl = canvas.getContext('webgl');
+if (!gl) {
+  alert("WebGL no está disponible en este navegador.");
+}
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0,0,canvas.width, canvas.height);
+}
+window.addEventListener('resize', resize);
+resize();
+
+const vsSource = `
+  attribute vec3 aPosition;
+  attribute vec3 aColor;
+  uniform mat4 uModelViewMatrix;
+  uniform mat4 uProjectionMatrix;
+  varying vec3 vColor;
+  void main(void){
+    gl_Position = uProjectionMatrix * uModelViewMatrix * vec4(aPosition, 1.0);
+    vColor = aColor;
+  }
+`;
+const fsSource = `
+  precision mediump float;
+  varying vec3 vColor;
+  void main(void){
+    gl_FragColor = vec4(vColor, 1.0);
+  }
+`;
+
+function compile(type, src){
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if(!gl.getShaderParameter(s, gl.COMPILE_STATUS)){
+    console.error(gl.getShaderInfoLog(s));
+    throw new Error("Error compilando shader");
+  }
+  return s;
+}
+const prog = gl.createProgram();
+gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSource));
+gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSource));
+gl.linkProgram(prog);
+if(!gl.getProgramParameter(prog, gl.LINK_STATUS)){
+  console.error(gl.getProgramInfoLog(prog));
+  throw new Error("Error linkeando programa");
+}
+gl.useProgram(prog);
+
+const attribPos = gl.getAttribLocation(prog, "aPosition");
+const attribColor = gl.getAttribLocation(prog, "aColor");
+const uniMV = gl.getUniformLocation(prog, "uModelViewMatrix");
+const uniP  = gl.getUniformLocation(prog, "uProjectionMatrix");
+
+function hsvToRgb(h, s, v) {
+  let c = v * s;
+  let x = c * (1 - Math.abs((h / 60) % 2 - 1));
+  let m = v - c;
+  let r=0, g=0, b=0;
+  if (0 <= h && h < 60) { r=c; g=x; b=0; }
+  else if (60 <= h && h < 120) { r=x; g=c; b=0; }
+  else if (120 <= h && h < 180) { r=0; g=c; b=x; }
+  else if (180 <= h && h < 240) { r=0; g=x; b=c; }
+  else if (240 <= h && h < 300) { r=x; g=0; b=c; }
+  else if (300 <= h && h < 360) { r=c; g=0; b=x; }
+  return [r+m, g+m, b+m];
+}
+
+function createCylinderX(radius, length, segments){
+  const pos = [];
+  const col = [];
+  const idx = [];
+
+  for(let i=0;i<=segments;i++){
+    const t = (i/segments) * Math.PI * 2;
+    const y = radius * Math.cos(t);
+    const z = radius * Math.sin(t);
+    const hue = (t * 180 / Math.PI) % 360;
+    const rgb = hsvToRgb(hue, 1.0, 1.0);
+
+    pos.push(-length/2, y, z);
+    col.push(rgb[0], rgb[1], rgb[2]);
+
+    pos.push(length/2, y, z);
+    col.push(rgb[0], rgb[1], rgb[2]);
+  }
+
+  for(let i=0; i<segments*2; i += 2){
+    idx.push(i, i+1, i+2);
+    idx.push(i+1, i+3, i+2);
+  }
+
+  const baseCenterIndex = pos.length/3;
+  pos.push(-length/2, 0, 0);
+  col.push(1.0, 0.6, 0.1);
+  const topCenterIndex = baseCenterIndex+1;
+  pos.push(length/2, 0, 0);
+  col.push(1.0, 0.6, 0.1);
+
+  for(let i=0;i<segments;i++){
+    const i0 = i*2;
+    const i1 = (i*2+2)%(segments*2);
+    idx.push(baseCenterIndex, i1, i0);
+
+    const j0 = i*2+1;
+    const j1 = ((i*2+3)%(segments*2));
+    idx.push(topCenterIndex, j0, j1);
+  }
+
+  return {
+    positions: new Float32Array(pos),
+    colors:    new Float32Array(col),
+    indices:   new Uint16Array(idx),
+    vertexCount: pos.length/3,
+    radius: radius,
+    length: length
+  };
+}
+
+const cyl = createCylinderX(0.8, 2.5, 48);
+
+const posBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+gl.bufferData(gl.ARRAY_BUFFER, cyl.positions, gl.STATIC_DRAW);
+
+const colBuf = gl.createBuffer();
+gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+gl.bufferData(gl.ARRAY_BUFFER, cyl.colors, gl.STATIC_DRAW);
+
+const idxBuf = gl.createBuffer();
+gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, cyl.indices, gl.STATIC_DRAW);
+
+function mat4Identity(){
+  return new Float32Array([1,0,0,0,  0,1,0,0,  0,0,1,0,  0,0,0,1]);
+}
+function mat4Multiply(a,b){
+  const out = new Float32Array(16);
+  for(let i=0;i<4;i++){
+    for(let j=0;j<4;j++){
+      out[i+j*4] = a[i]*b[j*4] + a[i+4]*b[j*4+1] + a[i+8]*b[j*4+2] + a[i+12]*b[j*4+3];
+    }
+  }
+  return out;
+}
+function mat4Translate(tx,ty,tz){
+  const m = mat4Identity();
+  m[12]=tx; m[13]=ty; m[14]=tz;
+  return m;
+}
+function mat4RotateY(a){
+  const c = Math.cos(a), s = Math.sin(a);
+  return new Float32Array([ c, 0, s, 0,
+                            0, 1, 0, 0,
+                           -s, 0, c, 0,
+                            0, 0, 0, 1]);
+}
+function mat4RotateX(a){
+  const c = Math.cos(a), s = Math.sin(a);
+  return new Float32Array([1, 0, 0, 0,
+                           0, c, -s,0,
+                           0, s,  c,0,
+                           0, 0,  0,1]);
+}
+function mat4Perspective(fovy, aspect, near, far){
+  const f = 1.0 / Math.tan(fovy / 2);
+  const out = new Float32Array(16);
+  out[0] = f / aspect;
+  out[5] = f;
+  out[10] = (far + near) / (near - far);
+  out[11] = -1;
+  out[14] = (2 * far * near) / (near - far);
+  return out;
+}
+function mat4LookAt(eye,center,up){
+  const fx = center[0]-eye[0], fy=center[1]-eye[1], fz=center[2]-eye[2];
+  const rl = 1/Math.hypot(fx,fy,fz);
+  const f = [fx*rl, fy*rl, fz*rl];
+  const ul = 1/Math.hypot(up[0],up[1],up[2]);
+  const u0=up[0]*ul, u1=up[1]*ul, u2=up[2]*ul;
+  const sx = f[1]*u2 - f[2]*u1;
+  const sy = f[2]*u0 - f[0]*u2;
+  const sz = f[0]*u1 - f[1]*u0;
+  const rl2 = 1/Math.hypot(sx,sy,sz);
+  const s=[sx*rl2,sy*rl2,sz*rl2];
+  const u=[ f[1]*s[2]-f[2]*s[1],
+            f[2]*s[0]-f[0]*s[2],
+            f[0]*s[1]-f[1]*s[0] ];
+  const out = new Float32Array(16);
+  out[0]=s[0]; out[4]=s[1]; out[8]=s[2]; out[12]=-(s[0]*eye[0]+s[1]*eye[1]+s[2]*eye[2]);
+  out[1]=u[0]; out[5]=u[1]; out[9]=u[2]; out[13]=-(u[0]*eye[0]+u[1]*eye[1]+u[2]*eye[2]);
+  out[2]= -f[0]; out[6]= -f[1]; out[10]= -f[2]; out[14]= (f[0]*eye[0]+f[1]*eye[1]+f[2]*eye[2]);
+  out[3]=0; out[7]=0; out[11]=0; out[15]=1;
+  return out;
+}
+
+const orbitRadius = 6.0;
+const cylinderRadius = cyl.radius;
+let angleOrbit = 0.0;
+const orbitSpeed = 0.0018;
+
+gl.enable(gl.DEPTH_TEST);
+
+function draw(){
+  gl.clearColor(1.0, 1.0, 1.0, 1.0);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+  const proj = mat4Perspective(45 * Math.PI / 180, canvas.width/canvas.height, 0.1, 100.0);
+
+  // ---- Cámara en coordenadas esféricas (sliders) ----
+  const theta = parseFloat(document.getElementById("thetaSlider").value);
+  const phi   = parseFloat(document.getElementById("phiSlider").value);
+  const radius= parseFloat(document.getElementById("radiusSlider").value);
+
+  const eyeX = radius * Math.sin(phi) * Math.cos(theta);
+  const eyeY = radius * Math.cos(phi);
+  const eyeZ = radius * Math.sin(phi) * Math.sin(theta);
+
+  const view = mat4LookAt([eyeX,eyeY,eyeZ],[0,0,0],[0,1,0]);
+
+  // Posición del cilindro en órbita
+  const cx = orbitRadius * Math.cos(angleOrbit);
+  const cz = orbitRadius * Math.sin(angleOrbit);
+
+  const Ralign = mat4RotateY(angleOrbit + Math.PI);
+  const spin = - (orbitRadius * angleOrbit) / cylinderRadius;
+  const Rspin = mat4RotateX(spin);
+  const T = mat4Translate(cx, 0.0, cz);
+
+  const model = mat4Multiply(mat4Multiply(T, Ralign), Rspin);
+  const modelView = mat4Multiply(view, model);
+
+  gl.uniformMatrix4fv(uniP, false, proj);
+  gl.uniformMatrix4fv(uniMV, false, modelView);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+  gl.enableVertexAttribArray(attribPos);
+  gl.vertexAttribPointer(attribPos, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, colBuf);
+  gl.enableVertexAttribArray(attribColor);
+  gl.vertexAttribPointer(attribColor, 3, gl.FLOAT, false, 0, 0);
+
+  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, idxBuf);
+  gl.drawElements(gl.TRIANGLES, cyl.indices.length, gl.UNSIGNED_SHORT, 0);
+
+  angleOrbit += orbitSpeed;
+  requestAnimationFrame(draw);
+}
+
+requestAnimationFrame(draw);
+</script>
+</body>
+</html>
