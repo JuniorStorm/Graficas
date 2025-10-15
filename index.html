@@ -111,7 +111,9 @@ function create1PixelTexture(gl, pixel) {
 function isPowerOf2(value) { return (value & (value - 1)) === 0; }
 
 function createTexture(gl, url) {
-  const texture = create1PixelTexture(gl, [128, 128, 128, 255]);
+  const texture = create1PixelTexture(gl, [180, 120, 200, 255]); 
+
+
   const image = new Image();
   image.crossOrigin = "anonymous";
   image.src = url;
@@ -198,7 +200,7 @@ async function main() {
 
   const textures = {
     miTextura: createTexture(gl, 'https://wallpapers.com/images/featured-full/estetica-de-seda-rosa-yvf02ur3mx6mmubh.jpg'),
-    piso: create1PixelTexture(gl, [0.75, 0.58, 0.89, 1])
+    piso: create1PixelTexture(gl, [205, 133, 63, 255])
   };
 
   const parts = obj.geometries.map(({ data }) => {
@@ -228,7 +230,8 @@ async function main() {
     webglUtils.resizeCanvasToDisplaySize(gl.canvas);
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.enable(gl.DEPTH_TEST);
-    gl.clearColor(0.75, 0.58, 0.89, 1) ;
+    gl.clearColor(0.78, 0.64, 0.78, 1); 
+
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
     const fov = degToRad(60);
@@ -250,33 +253,21 @@ async function main() {
     gl.useProgram(meshProgramInfo.program);
     webglUtils.setUniforms(meshProgramInfo, sharedUniforms);
 
-    // --- rebote y rotación (se mantiene la idea original con sin, pero
-    //     forzamos que la base del modelo se apoye en el piso)
-    let bounce = Math.abs(Math.sin(time * 2)) * 0.25;    // amplitud de rebote
-    let rotation = time * 1.5;                          // rotación continua
-    const baseHeight = 0.00;                            // poner 0.0 para que "toque" exactamente el piso
-
-    // ----- NUEVOS AJUSTES: escala y centrado -----
-    const scaleFactor = 1.8;     // <-- ajuste: letras más grandes
-    const desiredX = 0.0;        // centro en X del mundo
-    const desiredZ = 1.5;        // acercar un poco las letras en Z (era 2.0 antes)
-
-    // CORRECCIÓN CLAVE:
-    // Para que el mínimo Y del modelo (modelMinY) acabe en baseHeight + bounce,
-    // la Y mundial mínima queda:
-    // worldMinY = desiredPosY + ((modelMinY - centerY) * scale + centerY)
-    // => desiredPosY = (baseHeight + bounce) - ( (modelMinY - centerY) * scale + centerY )
+    // Movimiento de nuestro objeto 
+    
+    let bounce = Math.abs(Math.sin(time * 2)) * 0.25;    
+    let rotation = time * 1.5;                          
+    const baseHeight = 0.00;                            
+    const scaleFactor = 1.8;     
+    const desiredX = 0.0;        
+    const desiredZ = 1.5;        
     const relMinY = modelMinY - centerY;
     const desiredPosY = (baseHeight + bounce) - (relMinY * scaleFactor + centerY);
-
-    // Construimos la matriz world con: T(desiredPos) * T(center) * R * S * T(-center)
     const T_pos = m4.translation(desiredX, desiredPosY, desiredZ);
     const T_neg_center = m4.translation(-centerX, -centerY, -centerZ);
     const S = m4.scaling(scaleFactor, scaleFactor, scaleFactor);
     const R = m4.yRotation(rotation);
     const T_center = m4.translation(centerX, centerY, centerZ);
-
-    // Orden como en tu código original (multiplicaciones compuestas)
     const tmp1 = m4.multiply(S, T_neg_center);
     const tmp2 = m4.multiply(R, tmp1);
     const tmp3 = m4.multiply(T_center, tmp2);
@@ -287,8 +278,8 @@ async function main() {
       webglUtils.setBuffersAndAttributes(gl, meshProgramInfo, bufferInfo);
 
       const u_world = (i === parts.length - 1)
-        ? m4.translation(0, 0, 0) // piso fijo a y=0
-        : letterWorld;           // letras con rebote, rotación y escala alrededor del centro
+        ? m4.translation(0, 0, 0) 
+        : letterWorld;           
 
       webglUtils.setUniforms(meshProgramInfo, { u_world }, material);
       webglUtils.drawBufferInfo(gl, bufferInfo);
